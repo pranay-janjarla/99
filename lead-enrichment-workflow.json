@@ -1,0 +1,394 @@
+{
+  "name": "Lead enrichment (free plan)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enrich-lead",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b2c90b99-fd3a-4305-b266-052b40e8e4eb",
+      "name": "New lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        400
+      ],
+      "webhookId": "2543597b-4a79-4dbb-98b0-87e399b8b9bb"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// The six fields this workflow exists to fill.\nconst CORE = ['company', 'title', 'phone', 'industry', 'employee_count', 'technologies'];\nconst blank = v => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '');\n\n// Optional shared secret: set it here and send the same value in the x-webhook-secret header.\n// Left empty, anyone with the webhook URL can call it.\nconst WEBHOOK_SECRET = '';\nif (WEBHOOK_SECRET && $input.first().json.headers?.['x-webhook-secret'] !== WEBHOOK_SECRET) {\n  return [{ json: { action: 'respond', statusCode: 401, body: { error: 'Missing or wrong x-webhook-secret header.' } } }];\n}\n\n// Callers name fields their own way; take the common spellings and move on.\nconst raw = $input.first().json.body ?? {};\nconst src = raw.lead && typeof raw.lead === 'object' ? raw.lead : raw;\nconst pick = (...keys) => {\n  for (const k of keys) if (!blank(src[k])) return typeof src[k] === 'string' ? src[k].trim() : src[k];\n  return null;\n};\n\nconst lead = {\n  email: pick('email', 'work_email', 'workEmail'),\n  first_name: pick('first_name', 'firstName', 'firstname'),\n  last_name: pick('last_name', 'lastName', 'lastname'),\n  name: pick('name', 'full_name', 'fullName'),\n  company: pick('company', 'company_name', 'companyName', 'organization'),\n  title: pick('title', 'job_title', 'jobTitle', 'jobtitle'),\n  phone: pick('phone', 'phone_number', 'phoneNumber'),\n  industry: pick('industry'),\n  employee_count: pick('employee_count', 'employees', 'employeeCount', 'company_size'),\n  technologies: pick('technologies', 'tech', 'technographics'),\n  website: pick('website', 'domain', 'company_website', 'url'),\n  linkedin_url: pick('linkedin_url', 'linkedin', 'linkedinUrl'),\n};\nif (typeof lead.technologies === 'string') lead.technologies = lead.technologies.split(/[;,]/).map(t => t.trim()).filter(Boolean);\nif (lead.email) lead.email = String(lead.email).toLowerCase();\nlead.name = lead.name ?? ([lead.first_name, lead.last_name].filter(Boolean).join(' ') || null);\n\n// A consumer mailbox says nothing about the employer.\nconst FREE_MAIL = new Set([\n  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.co.uk', 'ymail.com', 'hotmail.com',\n  'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com',\n  'gmx.com', 'gmx.de', 'mail.com', 'yandex.com', 'zoho.com', 'rediffmail.com', 'qq.com', '163.com',\n]);\nconst hostOf = v => {\n  if (blank(v)) return null;\n  try { return new URL(/^https?:\\/\\//i.test(v) ? v : 'https://' + v).hostname.replace(/^www\\./, '').toLowerCase(); }\n  catch { return null; }\n};\nconst emailDomain = lead.email?.includes('@') ? lead.email.split('@')[1] : null;\nconst domain = hostOf(lead.website) ?? (emailDomain && !FREE_MAIL.has(emailDomain) ? emailDomain : null);\n\nconst missing = CORE.filter(f => blank(lead[f]));\nlet action = 'enrich', statusCode = 200, body = null;\nif (!missing.length) {\n  action = 'respond';\n  body = { status: 'complete', lead, filled: [], missing: [], sources: {} };\n} else if (!domain && !lead.company) {\n  action = 'respond';\n  statusCode = 422;\n  body = { status: 'not_enough_to_go_on', error: 'Send a work email, a website or a company name.', lead };\n}\nreturn [{ json: { lead, domain, missing, action, statusCode, body } }];"
+      },
+      "id": "3c3de67d-a759-4939-ade3-c703a422da0f",
+      "name": "Read lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9fd513f4-e2f3-424c-a6a4-ed5cbac6342b",
+              "leftValue": "={{ $json.action === 'enrich' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "aaefd124-aac9-45ab-bdac-49562c5d1179",
+      "name": "Enrich?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -144,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "02f28f92-0bff-4f32-b403-d2e914f272ee",
+              "leftValue": "={{ !!$json.domain }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "40bc7d8e-fa54-416a-bb10-4504a3756706",
+      "name": "Has a website?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        96,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  url: 'https://' + $json.domain,\n  formats: ['markdown', 'rawHtml'],\n  onlyMainContent: false,\n  removeBase64Images: true,\n  maxAge: 2 * 24 * 60 * 60 * 1000,\n  timeout: 30000\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 40000
+        }
+      },
+      "id": "4764fb40-8537-4568-99cf-b3d357dce72e",
+      "name": "Firecrawl: homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        336,
+        160
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Firecrawl"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One Serper query per item: the company's LinkedIn page (size, industry) and,\n// when there is a name, the person's (title). The model decides later whether\n// what came back is actually this person and this company.\nconst { lead, domain } = $('Read lead').first().json;\nconst page = $('Firecrawl: homepage').isExecuted ? $('Firecrawl: homepage').first().json.body?.data : null;\nconst company = lead.company ?? page?.metadata?.ogSiteName ?? (domain ? domain.split('.')[0] : null);\n\nconst queries = [{ kind: 'company', q: 'site:linkedin.com/company \"' + company + '\"' }];\nif (lead.name) queries.push({ kind: 'person', q: 'site:linkedin.com/in \"' + lead.name + '\" ' + company });\nreturn queries.map(json => ({ json, pairedItem: { item: 0 } }));"
+      },
+      "id": "ae48a203-6de6-4389-82c4-45d1726dfb18",
+      "name": "Plan searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: $json.q, num: 6 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "6a580bab-3a49-4923-b887-ccc95d484d6b",
+      "name": "Serper: LinkedIn search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        816,
+        288
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Serper"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code only fetches and trims; reading the evidence and deciding what is true\n// about this lead is the model's job.\nconst { lead, domain } = $('Read lead').first().json;\nconst errors = [];\nconst sections = [];\n\nif ($('Firecrawl: homepage').isExecuted) {\n  const res = $('Firecrawl: homepage').first().json;\n  const data = res.statusCode === 200 ? res.body?.data : null;\n  if (!data) errors.push('Firecrawl: ' + (res.error?.message ?? 'HTTP ' + res.statusCode + ' ' + JSON.stringify(res.body ?? '').slice(0, 200)));\n  else {\n    const html = data.rawHtml ?? '';\n    const all = (re, max) => [...html.matchAll(re)].map(m => (m[1] ?? m[0]).trim()).filter(Boolean).slice(0, max);\n    const uniq = xs => [...new Set(xs)];\n    sections.push([\n      '## Company homepage: https://' + domain,\n      'Title: ' + (data.metadata?.title ?? ''),\n      'Description: ' + (data.metadata?.description ?? ''),\n      '', 'Meta tags:', ...all(/<meta\\b[^>]*>/gi, 40),\n      '', 'Script sources:', ...uniq(all(/<script\\b[^>]*\\bsrc=[\"']([^\"']+)/gi, 80)),\n      '', 'Link hrefs:', ...uniq(all(/<link\\b[^>]*\\bhref=[\"']([^\"']+)/gi, 40)),\n      '', 'Inline script openings:', ...all(/<script\\b(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)<\\/script>/gi, 40).map(t => t.slice(0, 200)),\n      '', 'Phone links:', ...uniq(all(/href=[\"']tel:([^\"']+)/gi, 5)),\n      '', 'Page text:', (data.markdown ?? '').slice(0, 8000),\n    ].join('\\n'));\n  }\n}\n\nconst plans = $('Plan searches').all();\n$input.all().forEach((item, i) => {\n  const res = item.json;\n  const q = res.body?.searchParameters?.q ?? plans[i]?.json.q;\n  if (res.statusCode !== 200) {\n    errors.push('Serper: ' + (res.error?.message ?? 'HTTP ' + res.statusCode + ' ' + JSON.stringify(res.body ?? '').slice(0, 200)));\n    return;\n  }\n  const kg = res.body?.knowledgeGraph;\n  const lines = (res.body?.organic ?? []).slice(0, 6).map((r, n) => (n + 1) + '. ' + r.title + ' - ' + r.link + '\\n   ' + (r.snippet ?? ''));\n  sections.push(['## Google results for: ' + q, ...(kg ? ['Knowledge panel: ' + JSON.stringify(kg).slice(0, 1500)] : []), ...lines].join('\\n'));\n});\n\nconst messages = [\n  {\n    role: 'system',\n    content: [\n      'You enrich a sales lead for a CRM from the evidence given: the company homepage and Google results for LinkedIn pages.',\n      'For each field return a value and the source it came from: \"website\", \"linkedin_person\", \"linkedin_company\" or \"search\". Use null for both when the evidence does not show it.',\n      '- company: the company name as the company presents it.',\n      '- title: the person\\'s current job title. Only from a result that is clearly this person (same name) at this company.',\n      '- phone: the company\\'s main phone number exactly as written; null if none is shown.',\n      '- industry: a short label (2-4 words), e.g. \"B2B software\", \"E-commerce - apparel\", \"Dental clinic\".',\n      '- employee_count: the headcount or size range as stated (e.g. \"51-200\" from LinkedIn\\'s \"Company size\"). Never estimate.',\n      '- linkedin_url / company_linkedin_url: the profile URLs from the results, only when they clearly match.',\n      '- technologies: products the website is built on or runs, recognised from script sources, link hrefs, meta generator tags and inline scripts (e.g. Shopify, WordPress, HubSpot, Google Tag Manager, Google Analytics 4, Meta Pixel, Klaviyo, Intercom, Stripe, Hotjar). Common product names; only what the markup shows.',\n      'A wrong value is worse than a missing one. When unsure, return null.',\n    ].join('\\n'),\n  },\n  {\n    role: 'user',\n    content: ['## Lead as received', JSON.stringify(lead, null, 2), ...sections].join('\\n\\n').slice(0, 30000),\n  },\n];\nreturn [{ json: { messages, errors, evidenceCount: sections.length }, pairedItem: { item: 0 } }];"
+      },
+      "id": "88b66944-6948-4baf-ac01-4be50936505b",
+      "name": "Gather evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  // Model settings live here: $env is blocked on n8n Cloud and Variables ($vars) need a paid plan.\n  const MODEL = 'gpt-5-nano';\n  const REASONING_EFFORT = 'low';\n  const field = { type: 'object', additionalProperties: false, required: ['value', 'source'],\n    properties: { value: { type: ['string', 'null'] }, source: { type: ['string', 'null'] } } };\n  const fields = ['company', 'title', 'phone', 'industry', 'employee_count', 'linkedin_url', 'company_linkedin_url'];\n  return JSON.stringify({\n    model: MODEL,\n    reasoning_effort: REASONING_EFFORT,\n    max_completion_tokens: 3000,\n    messages: $json.messages,\n    response_format: { type: 'json_schema', json_schema: { name: 'lead_enrichment', strict: true, schema: {\n      type: 'object',\n      additionalProperties: false,\n      required: [...fields, 'technologies'],\n      properties: {\n        ...Object.fromEntries(fields.map(f => [f, field])),\n        technologies: { type: 'array', items: { type: 'string' } }\n      }\n    } } }\n  });\n})() }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 90000
+        }
+      },
+      "id": "4d7eeed2-4b30-4763-a0ba-639cae182d6d",
+      "name": "OpenAI: read evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1296,
+        288
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// The six fields this workflow exists to fill.\nconst CORE = ['company', 'title', 'phone', 'industry', 'employee_count', 'technologies'];\nconst blank = v => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '');\n\nconst { lead: given, domain } = $('Read lead').first().json;\nconst errors = [...$('Gather evidence').first().json.errors];\nconst res = $input.first().json;\n\nlet read = null;\nif (res.statusCode === 200) {\n  try { read = JSON.parse(res.body?.choices?.[0]?.message?.content ?? ''); }\n  catch { errors.push('OpenAI: reply was not JSON'); }\n} else {\n  errors.push('OpenAI: ' + (res.error?.message ?? 'HTTP ' + res.statusCode + ' ' + JSON.stringify(res.body ?? '').slice(0, 200)));\n}\n\n// Only blanks are filled: whatever the caller sent is kept as sent.\nconst lead = { ...given };\nconst filled = [];\nconst sources = {};\nconst fill = (field, value, source) => {\n  if (blank(value) || !blank(lead[field])) return;\n  lead[field] = typeof value === 'string' ? value.trim() : value;\n  filled.push(field);\n  sources[field] = source;\n};\nif (read) {\n  for (const f of ['company', 'title', 'phone', 'industry', 'employee_count', 'linkedin_url', 'company_linkedin_url']) {\n    fill(f, read[f]?.value, read[f]?.source ?? 'search');\n  }\n  fill('technologies', (read.technologies ?? []).filter(t => !blank(t)), 'website');\n}\nif (domain) fill('website', 'https://' + domain, 'email domain');\n\nconst missing = CORE.filter(f => blank(lead[f]));\nconst status = !read ? 'error' : !filled.length ? 'not_found' : missing.length ? 'partial' : 'enriched';\nreturn [{\n  json: {\n    statusCode: status === 'error' ? 502 : 200,\n    body: { status, lead, filled, missing, sources, ...(errors.length ? { errors } : {}) },\n  },\n  pairedItem: { item: 0 },\n}];"
+      },
+      "id": "bf472889-bdc5-4ab6-b0b9-b9f5acf200ad",
+      "name": "Enriched lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "4c49a8bb-e47e-4f36-a2d1-9898e1eeff20",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "New lead": {
+      "main": [
+        [
+          {
+            "node": "Read lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read lead": {
+      "main": [
+        [
+          {
+            "node": "Enrich?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich?": {
+      "main": [
+        [
+          {
+            "node": "Has a website?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has a website?": {
+      "main": [
+        [
+          {
+            "node": "Firecrawl: homepage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Plan searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firecrawl: homepage": {
+      "main": [
+        [
+          {
+            "node": "Plan searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan searches": {
+      "main": [
+        [
+          {
+            "node": "Serper: LinkedIn search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Serper: LinkedIn search": {
+      "main": [
+        [
+          {
+            "node": "Gather evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gather evidence": {
+      "main": [
+        [
+          {
+            "node": "OpenAI: read evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI: read evidence": {
+      "main": [
+        [
+          {
+            "node": "Enriched lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enriched lead": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
