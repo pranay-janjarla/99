@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "enrich-lead",
-        "authentication": "headerAuth",
+        "authentication": "none",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "jsCode": "\n// The six fields this workflow exists to fill.\nconst CORE = ['company', 'title', 'phone', 'industry', 'employee_count', 'technologies'];\nconst blank = v => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '');\n\n// Callers name fields their own way; take the common spellings and move on.\nconst raw = $input.first().json.body ?? {};\nconst src = raw.lead && typeof raw.lead === 'object' ? raw.lead : raw;\nconst pick = (...keys) => {\n  for (const k of keys) if (!blank(src[k])) return typeof src[k] === 'string' ? src[k].trim() : src[k];\n  return null;\n};\n\nconst lead = {\n  email: pick('email', 'work_email', 'workEmail'),\n  first_name: pick('first_name', 'firstName', 'firstname'),\n  last_name: pick('last_name', 'lastName', 'lastname'),\n  name: pick('name', 'full_name', 'fullName'),\n  company: pick('company', 'company_name', 'companyName', 'organization'),\n  title: pick('title', 'job_title', 'jobTitle', 'jobtitle'),\n  phone: pick('phone', 'phone_number', 'phoneNumber'),\n  industry: pick('industry'),\n  employee_count: pick('employee_count', 'employees', 'employeeCount', 'company_size'),\n  technologies: pick('technologies', 'tech', 'technographics'),\n  website: pick('website', 'domain', 'company_website', 'url'),\n  linkedin_url: pick('linkedin_url', 'linkedin', 'linkedinUrl'),\n};\nif (typeof lead.technologies === 'string') lead.technologies = lead.technologies.split(/[;,]/).map(t => t.trim()).filter(Boolean);\nif (lead.email) lead.email = String(lead.email).toLowerCase();\nlead.name = lead.name ?? ([lead.first_name, lead.last_name].filter(Boolean).join(' ') || null);\n\n// A consumer mailbox says nothing about the employer.\nconst FREE_MAIL = new Set([\n  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.co.uk', 'ymail.com', 'hotmail.com',\n  'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com',\n  'gmx.com', 'gmx.de', 'mail.com', 'yandex.com', 'zoho.com', 'rediffmail.com', 'qq.com', '163.com',\n]);\nconst hostOf = v => {\n  if (blank(v)) return null;\n  try { return new URL(/^https?:\\/\\//i.test(v) ? v : 'https://' + v).hostname.replace(/^www\\./, '').toLowerCase(); }\n  catch { return null; }\n};\nconst emailDomain = lead.email?.includes('@') ? lead.email.split('@')[1] : null;\nconst domain = hostOf(lead.website) ?? (emailDomain && !FREE_MAIL.has(emailDomain) ? emailDomain : null);\n\nconst missing = CORE.filter(f => blank(lead[f]));\nlet action = 'enrich', statusCode = 200, body = null;\nif (!missing.length) {\n  action = 'respond';\n  body = { status: 'complete', lead, filled: [], missing: [], sources: {} };\n} else if (!domain && !lead.company) {\n  action = 'respond';\n  statusCode = 422;\n  body = { status: 'not_enough_to_go_on', error: 'Send a work email, a website or a company name.', lead };\n}\nreturn [{ json: { lead, domain, missing, action, statusCode, body } }];"
+        "jsCode": "\n// The six fields this workflow exists to fill.\nconst CORE = ['company', 'title', 'phone', 'industry', 'employee_count', 'technologies'];\nconst blank = v => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '');\n\n// Optional shared secret: set it here and send the same value in the x-webhook-secret header.\n// Left empty, anyone with the webhook URL can call it.\nconst WEBHOOK_SECRET = '';\nif (WEBHOOK_SECRET && $input.first().json.headers?.['x-webhook-secret'] !== WEBHOOK_SECRET) {\n  return [{ json: { action: 'respond', statusCode: 401, body: { error: 'Missing or wrong x-webhook-secret header.' } } }];\n}\n\n// Callers name fields their own way; take the common spellings and move on.\nconst raw = $input.first().json.body ?? {};\nconst src = raw.lead && typeof raw.lead === 'object' ? raw.lead : raw;\nconst pick = (...keys) => {\n  for (const k of keys) if (!blank(src[k])) return typeof src[k] === 'string' ? src[k].trim() : src[k];\n  return null;\n};\n\nconst lead = {\n  email: pick('email', 'work_email', 'workEmail'),\n  first_name: pick('first_name', 'firstName', 'firstname'),\n  last_name: pick('last_name', 'lastName', 'lastname'),\n  name: pick('name', 'full_name', 'fullName'),\n  company: pick('company', 'company_name', 'companyName', 'organization'),\n  title: pick('title', 'job_title', 'jobTitle', 'jobtitle'),\n  phone: pick('phone', 'phone_number', 'phoneNumber'),\n  industry: pick('industry'),\n  employee_count: pick('employee_count', 'employees', 'employeeCount', 'company_size'),\n  technologies: pick('technologies', 'tech', 'technographics'),\n  website: pick('website', 'domain', 'company_website', 'url'),\n  linkedin_url: pick('linkedin_url', 'linkedin', 'linkedinUrl'),\n};\nif (typeof lead.technologies === 'string') lead.technologies = lead.technologies.split(/[;,]/).map(t => t.trim()).filter(Boolean);\nif (lead.email) lead.email = String(lead.email).toLowerCase();\nlead.name = lead.name ?? ([lead.first_name, lead.last_name].filter(Boolean).join(' ') || null);\n\n// A consumer mailbox says nothing about the employer.\nconst FREE_MAIL = new Set([\n  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.co.uk', 'ymail.com', 'hotmail.com',\n  'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com',\n  'gmx.com', 'gmx.de', 'mail.com', 'yandex.com', 'zoho.com', 'rediffmail.com', 'qq.com', '163.com',\n]);\nconst hostOf = v => {\n  if (blank(v)) return null;\n  try { return new URL(/^https?:\\/\\//i.test(v) ? v : 'https://' + v).hostname.replace(/^www\\./, '').toLowerCase(); }\n  catch { return null; }\n};\nconst emailDomain = lead.email?.includes('@') ? lead.email.split('@')[1] : null;\nconst domain = hostOf(lead.website) ?? (emailDomain && !FREE_MAIL.has(emailDomain) ? emailDomain : null);\n\nconst missing = CORE.filter(f => blank(lead[f]));\nlet action = 'enrich', statusCode = 200, body = null;\nif (!missing.length) {\n  action = 'respond';\n  body = { status: 'complete', lead, filled: [], missing: [], sources: {} };\n} else if (!domain && !lead.company) {\n  action = 'respond';\n  statusCode = 422;\n  body = { status: 'not_enough_to_go_on', error: 'Send a work email, a website or a company name.', lead };\n}\nreturn [{ json: { lead, domain, missing, action, statusCode, body } }];"
       },
       "id": "3c3de67d-a759-4939-ade3-c703a422da0f",
       "name": "Read lead",
@@ -107,7 +107,7 @@
         "method": "POST",
         "url": "https://api.firecrawl.dev/v1/scrape",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  url: 'https://' + $json.domain,\n  formats: ['markdown', 'rawHtml'],\n  onlyMainContent: false,\n  removeBase64Images: true,\n  maxAge: 2 * 24 * 60 * 60 * 1000,\n  timeout: 30000\n}) }}",
@@ -129,7 +129,12 @@
         336,
         160
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Firecrawl"
+        }
+      }
     },
     {
       "parameters": {
@@ -149,7 +154,7 @@
         "method": "POST",
         "url": "https://google.serper.dev/search",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ q: $json.q, num: 6 }) }}",
@@ -171,7 +176,12 @@
         816,
         288
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Serper"
+        }
+      }
     },
     {
       "parameters": {
@@ -213,7 +223,12 @@
         1296,
         288
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      }
     },
     {
       "parameters": {
